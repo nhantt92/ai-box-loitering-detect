@@ -1,0 +1,28 @@
+{
+  "revision": 0,
+  "camera": {"url": "rtsp://192.168.1.6:554/profile2", "decoder": "omxh264dec"},
+  "model": {"profile": "yolov5-a733-640", "score_threshold": 0.01, "nms_iou": 0.45},
+  "tracking": {
+    "low_confidence": 0.10,
+    "high_confidence": 0.50,
+    "new_track_confidence": 0.60,
+    "first_match_iou": 0.20,
+    "second_match_iou": 0.10,
+    "unconfirmed_match_iou": 0.30,
+    "track_ttl_seconds": 2.0,
+    "max_predict_seconds": 1.0,
+    "process_noise": 2.0,
+    "measurement_noise": 1.0,
+    "min_hits": 2
+  },
+  "zones": [],
+  "loitering": {
+    "enter_confirm_seconds": 1.0,
+    "exit_confirm_seconds": 1.0,
+    "lost_grace_seconds": 2.0,
+    "max_observation_gap_seconds": 1.0
+  },
+  "running": {"enabled": false, "mode": "body_heights_per_second", "start_threshold": 2.5, "end_threshold": 1.8, "window_seconds": 1.0, "min_observations": 5},
+  "preview": {"fps": 5, "max_width": 640, "quality": 70, "max_clients": 3},
+  "storage": {"retention_days": 30, "max_snapshot_bytes": 1073741824}
+}

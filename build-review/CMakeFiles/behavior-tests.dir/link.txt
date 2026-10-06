@@ -1,0 +1,1 @@
+/usr/bin/c++ "CMakeFiles/behavior-tests.dir/tests/behavior_tests.cpp.o" -o behavior-tests  -Wl,-rpath,/usr/local/lib libaibox_behavior.a libaibox_config.a libaibox_tracker.a /usr/local/lib/libopencv_imgcodecs.so.4.13.0 /usr/local/lib/libopencv_imgproc.so.4.13.0 /usr/local/lib/libopencv_core.so.4.13.0 libaibox_rules.a 

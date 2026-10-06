@@ -1,0 +1,123 @@
+Start testing: Oct 06 13:59 +07
+----------------------------------------------------------
+1/8 Testing: rule-tests
+1/8 Test: rule-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/rule-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"rule-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"rule-tests" end time: Oct 06 13:59 +07
+"rule-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/8 Testing: tracker-tests
+2/8 Test: tracker-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/tracker-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"tracker-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"tracker-tests" end time: Oct 06 13:59 +07
+"tracker-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/8 Testing: behavior-tests
+3/8 Test: behavior-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/behavior-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"behavior-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"behavior-tests" end time: Oct 06 13:59 +07
+"behavior-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/8 Testing: event-store-tests
+4/8 Test: event-store-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/event-store-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"event-store-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"event-store-tests" end time: Oct 06 13:59 +07
+"event-store-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/8 Testing: preview-tests
+5/8 Test: preview-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/preview-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"preview-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.22 sec
+----------------------------------------------------------
+Test Passed.
+"preview-tests" end time: Oct 06 13:59 +07
+"preview-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/8 Testing: core-api-tests
+6/8 Test: core-api-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/core-api-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"core-api-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"core-api-tests" end time: Oct 06 13:59 +07
+"core-api-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/8 Testing: snapshot-tests
+7/8 Test: snapshot-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/snapshot-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"snapshot-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"snapshot-tests" end time: Oct 06 13:59 +07
+"snapshot-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/8 Testing: yolo-tests
+8/8 Test: yolo-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-review/yolo-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-review
+"yolo-tests" start time: Oct 06 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"yolo-tests" end time: Oct 06 13:59 +07
+"yolo-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Oct 06 13:59 +07

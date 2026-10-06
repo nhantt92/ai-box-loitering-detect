@@ -1,0 +1,9 @@
+rule-tests 42 5.94863e-05
+yolo-tests 44 0.00132731
+tracker-tests 38 4.34341e-05
+behavior-tests 34 9.41914e-05
+event-store-tests 33 0.000642171
+preview-tests 27 0.00796685
+core-api-tests 23 0.00160215
+snapshot-tests 21 0.00174905
+---

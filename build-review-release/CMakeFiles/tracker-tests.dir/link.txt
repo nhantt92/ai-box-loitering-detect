@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG "CMakeFiles/tracker-tests.dir/tests/tracker_tests.cpp.o" -o tracker-tests  -Wl,-rpath,/usr/local/lib libaibox_tracker.a /usr/local/lib/libopencv_imgcodecs.so.4.13.0 /usr/local/lib/libopencv_imgproc.so.4.13.0 /usr/local/lib/libopencv_core.so.4.13.0 

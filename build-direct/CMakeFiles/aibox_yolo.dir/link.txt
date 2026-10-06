@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_yolo.a CMakeFiles/aibox_yolo.dir/src/detector/yolo.cpp.o
+/usr/bin/ranlib libaibox_yolo.a

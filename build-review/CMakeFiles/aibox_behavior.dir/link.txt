@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_behavior.a CMakeFiles/aibox_behavior.dir/src/behavior/coordinator.cpp.o
+/usr/bin/ranlib libaibox_behavior.a

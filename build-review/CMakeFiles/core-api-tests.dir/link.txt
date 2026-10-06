@@ -1,0 +1,1 @@
+/usr/bin/c++ "CMakeFiles/core-api-tests.dir/tests/core_api_tests.cpp.o" -o core-api-tests  -Wl,-rpath,/usr/local/lib libaibox_core_api.a libaibox_config.a libaibox_event_store.a /usr/lib/x86_64-linux-gnu/libsqlite3.so libaibox_preview.a libaibox_rules.a /usr/local/lib/libopencv_imgcodecs.so.4.13.0 /usr/local/lib/libopencv_imgproc.so.4.13.0 /usr/local/lib/libopencv_core.so.4.13.0 

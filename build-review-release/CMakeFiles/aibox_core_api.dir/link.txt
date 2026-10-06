@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_core_api.a CMakeFiles/aibox_core_api.dir/src/core_api.cpp.o
+/usr/bin/ranlib libaibox_core_api.a

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Box · Edge Console</title><link rel="stylesheet" href="/style.css?v=8"></head>
+<body>
+<section class="login" id="login"><div class="brand-mark">AI</div><p class="eyebrow">EDGE INTELLIGENCE PLATFORM</p><h1 id="login-title">Đăng nhập</h1><p class="muted" id="login-subtitle">Quản trị thiết bị AI Box</p><form><input type="password" id="password" autocomplete="current-password" placeholder="Mật khẩu quản trị" required><button id="login-button">Đăng nhập</button></form><p id="message" role="alert"></p></section>
+<section id="dashboard" class="app-shell" hidden>
+ <aside class="sidebar">
+  <div class="brand"><div class="brand-mark">AI</div><div><strong>AI BOX</strong><small>EDGE CONSOLE</small></div></div>
+  <div class="nav-heading" data-nav-section="workspace">WORKSPACE</div>
+  <nav aria-label="Điều hướng chính">
+   <button data-page="live"><span class="nav-icon">◫</span><span>Trực tiếp</span></button>
+   <button data-page="model"><span class="nav-icon">◈</span><span>Model & AI</span></button>
+   <button data-page="system"><span class="nav-icon">⌁</span><span>Camera / Hệ thống</span></button>
+   <button data-page="zones"><span class="nav-icon">⬡</span><span>Vùng loitering</span></button>
+   <button data-page="behavior"><span class="nav-icon">⌖</span><span>Hành vi</span></button>
+   <button data-page="running"><span class="nav-icon">↗</span><span>Chuyển động nhanh</span></button>
+   <button data-page="performance"><span class="nav-icon">◷</span><span>Tracking / Hiệu năng</span></button>
+   <button data-page="events"><span class="nav-icon">▤</span><span>Sự kiện</span></button>
+  </nav>
+  <div class="sidebar-footer"><span class="live-dot"></span><span id="sidebar-device">Orange Pi · A733</span><small id="sidebar-runtime">AWNN / VIPLite</small></div>
+ </aside>
+ <div class="main-shell">
+  <header class="topbar"><div><p class="eyebrow" id="page-eyebrow">AI BOX / EDGE CONSOLE</p><h1 id="page-title">Trực tiếp</h1></div><div class="topbar-actions"><span id="state" class="state-pill">Mất kết nối</span><label for="language-select" id="language-label" class="sr-only">Ngôn ngữ</label><select id="language-select" aria-label="Ngôn ngữ"><option value="vi">Tiếng Việt</option><option value="en">English</option></select><button id="logout" class="button-quiet">Đăng xuất</button></div></header>
+  <main class="workspace"><p id="page-intro" class="page-intro"></p><article id="content"></article></main>
+ </div>
+</section>
+<script src="/app.js?v=8"></script></body></html>

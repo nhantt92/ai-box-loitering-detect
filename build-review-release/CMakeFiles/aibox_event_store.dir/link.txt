@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_event_store.a CMakeFiles/aibox_event_store.dir/src/storage/event_store.cpp.o
+/usr/bin/ranlib libaibox_event_store.a

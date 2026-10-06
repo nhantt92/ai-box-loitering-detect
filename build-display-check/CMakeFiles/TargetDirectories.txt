@@ -1,0 +1,10 @@
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/aibox_rules.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/aibox_yolo.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/aibox_video.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/aibox_render.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/ai-box-core.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/rule-tests.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/yolo-tests.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/test.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/edit_cache.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-display-check/CMakeFiles/rebuild_cache.dir

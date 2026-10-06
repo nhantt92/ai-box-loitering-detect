@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_config.a CMakeFiles/aibox_config.dir/src/config.cpp.o
+/usr/bin/ranlib libaibox_config.a

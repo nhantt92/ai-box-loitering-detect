@@ -1,0 +1,6 @@
+/config/camera.private.env
+/data/
+/build/
+/build-awnn/
+__pycache__/
+*.py[cod]

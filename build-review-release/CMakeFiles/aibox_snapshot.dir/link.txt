@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_snapshot.a CMakeFiles/aibox_snapshot.dir/src/storage/snapshot_writer.cpp.o
+/usr/bin/ranlib libaibox_snapshot.a

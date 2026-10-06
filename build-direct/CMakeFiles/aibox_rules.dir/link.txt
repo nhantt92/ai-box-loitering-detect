@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_rules.a CMakeFiles/aibox_rules.dir/src/behavior/engines.cpp.o
+/usr/bin/ranlib libaibox_rules.a

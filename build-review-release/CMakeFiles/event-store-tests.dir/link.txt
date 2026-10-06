@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG "CMakeFiles/event-store-tests.dir/tests/event_store_tests.cpp.o" -o event-store-tests  libaibox_event_store.a /usr/lib/x86_64-linux-gnu/libsqlite3.so 

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_preview.a CMakeFiles/aibox_preview.dir/src/render/preview_publisher.cpp.o
+/usr/bin/ranlib libaibox_preview.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_video.a CMakeFiles/aibox_video.dir/src/video/gst_rtsp_source.cpp.o
+/usr/bin/ranlib libaibox_video.a

@@ -1,0 +1,1 @@
+/usr/bin/c++ "CMakeFiles/preview-tests.dir/tests/preview_tests.cpp.o" -o preview-tests  -Wl,-rpath,/usr/local/lib libaibox_preview.a libaibox_rules.a /usr/local/lib/libopencv_imgcodecs.so.4.13.0 /usr/local/lib/libopencv_imgproc.so.4.13.0 /usr/local/lib/libopencv_core.so.4.13.0 

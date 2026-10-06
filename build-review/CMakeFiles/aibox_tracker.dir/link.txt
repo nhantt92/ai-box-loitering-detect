@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_tracker.a CMakeFiles/aibox_tracker.dir/src/tracker/byte_tracker.cpp.o
+/usr/bin/ranlib libaibox_tracker.a

@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG "CMakeFiles/snapshot-tests.dir/tests/snapshot_tests.cpp.o" -o snapshot-tests  -Wl,-rpath,/usr/local/lib libaibox_snapshot.a libaibox_event_store.a /usr/lib/x86_64-linux-gnu/libsqlite3.so /usr/local/lib/libopencv_imgcodecs.so.4.13.0 /usr/local/lib/libopencv_imgproc.so.4.13.0 /usr/local/lib/libopencv_core.so.4.13.0 

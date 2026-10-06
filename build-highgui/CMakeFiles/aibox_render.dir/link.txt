@@ -1,0 +1,2 @@
+/usr/bin/ar qc libaibox_render.a CMakeFiles/aibox_render.dir/src/render/sdl_renderer.cpp.o
+/usr/bin/ranlib libaibox_render.a

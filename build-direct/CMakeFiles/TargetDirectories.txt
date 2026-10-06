@@ -1,0 +1,10 @@
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/aibox_rules.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/aibox_yolo.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/aibox_video.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/aibox_render.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/ai-box-core.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/rule-tests.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/yolo-tests.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/test.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/edit_cache.dir
+/home/nhantt/2026/ai-box-loitering-detect/build-direct/CMakeFiles/rebuild_cache.dir

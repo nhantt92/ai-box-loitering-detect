@@ -1,0 +1,33 @@
+Start testing: Oct 05 13:59 +07
+----------------------------------------------------------
+1/2 Testing: rule-tests
+1/2 Test: rule-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-direct/rule-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-direct
+"rule-tests" start time: Oct 05 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"rule-tests" end time: Oct 05 13:59 +07
+"rule-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/2 Testing: yolo-tests
+2/2 Test: yolo-tests
+Command: "/home/nhantt/2026/ai-box-loitering-detect/build-direct/yolo-tests"
+Directory: /home/nhantt/2026/ai-box-loitering-detect/build-direct
+"yolo-tests" start time: Oct 05 13:59 +07
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"yolo-tests" end time: Oct 05 13:59 +07
+"yolo-tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Oct 05 13:59 +07
