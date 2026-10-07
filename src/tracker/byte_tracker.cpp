@@ -179,6 +179,33 @@ void correct(InternalTrack& t, const Box& b, float confidence,
   t.matched_this_update = true;
 }
 
+double association_affinity(const InternalTrack& track, const Box& detection,
+                            const ByteTrackConfig& config) {
+  const Box predicted = box_from(track.x);
+  const double overlap = iou(predicted, detection);
+  const auto z = measure(detection);
+  const double dx = z[0] - track.x[0];
+  const double dy = z[1] - track.x[1];
+  const double s00 = track.p[0][0] + config.measurement_noise;
+  const double s01 = track.p[0][1];
+  const double s11 = track.p[1][1] + config.measurement_noise;
+  const double determinant = s00 * s11 - s01 * s01;
+  if (determinant <= 1e-9) return overlap;
+
+  const double mahalanobis_squared =
+      (s11 * dx * dx - 2.0 * s01 * dx * dy + s00 * dy * dy) / determinant;
+  const double scale = std::max(1.0, (track.x[3] + z[3]) * 0.5);
+  const double normalized_distance = std::hypot(dx, dy) / scale;
+  // Keep re-association local: covariance helps bridge a short occlusion,
+  // while the body-height cap prevents a stale prediction taking a new person.
+  if (!std::isfinite(mahalanobis_squared) || mahalanobis_squared > 9.21 ||
+      normalized_distance > 2.0)
+    return overlap;
+  const double kalman_similarity =
+      std::max(0.0, 1.0 - std::sqrt(mahalanobis_squared / 9.21));
+  return std::max(overlap, 0.55 * kalman_similarity);
+}
+
 InternalTrack make_track(const Detection& d, Clock::time_point at, int id,
                          const ByteTrackConfig& c) {
   InternalTrack t;
@@ -266,7 +293,7 @@ std::vector<Track> ByteTracker::update(const std::vector<Detection>& input,
         const auto& t = impl_->tracks[track_ids[r]];
         const auto& d = valid[det_ids[c]];
         if (t.class_id == d.class_id)
-          costs[r][c] = 1.0 - iou(box_from(t.x), d.box);
+          costs[r][c] = 1.0 - association_affinity(t, d.box, config_);
       }
     auto matches = assign(costs, 1.0 - threshold);
     std::vector<char> used_tracks(track_ids.size()), used_dets(det_ids.size());

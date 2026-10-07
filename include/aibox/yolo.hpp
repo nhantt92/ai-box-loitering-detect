@@ -12,4 +12,7 @@ struct Detection { Box box; int class_id{}; float confidence{}; };
 std::vector<Detection> decode_yolov5(const std::vector<YoloHead>& heads, const Letterbox& transform,
                                       float score_threshold=0.01f, float nms_iou=0.45f,
                                       bool person_only=true);
+std::vector<Detection> decode_yolov5(const std::vector<YoloHead>& heads, const Letterbox& transform,
+                                      float score_threshold, float nms_iou,
+                                      const std::vector<int>& class_ids);
 }

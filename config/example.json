@@ -1,7 +1,7 @@
 {
   "revision": 0,
-  "camera": {"url": "rtsp://192.168.1.6:554/profile2", "decoder": "omxh264dec"},
-  "model": {"profile": "yolov5-a733-640", "score_threshold": 0.01, "nms_iou": 0.45},
+  "camera": {"source_type": "rtsp", "url": "rtsp://192.168.1.6:554/profile2", "decoder": "omxh264dec", "credentials_explicit": false},
+  "model": {"profile": "yolov5-a733-640", "score_threshold": 0.01, "nms_iou": 0.45, "classes": [0]},
   "tracking": {
     "low_confidence": 0.10,
     "high_confidence": 0.50,
@@ -23,6 +23,8 @@
     "max_observation_gap_seconds": 1.0
   },
   "running": {"enabled": false, "mode": "body_heights_per_second", "start_threshold": 2.5, "end_threshold": 1.8, "window_seconds": 1.0, "min_observations": 5},
-  "preview": {"fps": 5, "max_width": 640, "quality": 70, "max_clients": 3},
+  "running_detection": {"enabled": false, "mode": "body_heights_per_second", "start_threshold": 3.6, "end_threshold": 2.8, "window_seconds": 1.0, "min_observations": 5, "min_span_seconds": 0.5, "start_confirm_seconds": 0.4, "end_confirm_seconds": 0.8, "lost_grace_seconds": 2.0, "max_gap_seconds": 0.5},
+  "crowd": {"enabled": false, "trigger_people": 5, "clear_people": 3, "enter_confirm_seconds": 1.0, "exit_confirm_seconds": 2.0, "max_observation_gap_seconds": 1.0},
+  "preview": {"fps": 10, "max_width": 1280, "quality": 82, "max_clients": 3},
   "storage": {"retention_days": 30, "max_snapshot_bytes": 1073741824}
 }

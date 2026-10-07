@@ -173,6 +173,8 @@ Json event_json(const StoredEvent& event) {
       {"ended_utc", event.ended_utc.empty() ? Json(nullptr) : Json(event.ended_utc)},
       {"duration_seconds", event.duration_seconds},
       {"dwell_seconds", event.dwell_seconds}, {"peak_speed", event.peak_speed},
+      {"crowd_count", event.crowd_count},
+      {"crowd_threshold", event.crowd_threshold},
       {"speed_unit", event.speed_unit}, {"end_reason", event.end_reason},
       {"active", event.active}, {"snapshot_state", event.snapshot_state},
       {"snapshot_url", event.snapshot_state == "ready"
@@ -249,11 +251,15 @@ struct CoreApiServer::Impl {
           {"dwell_seconds", zone.dwell_seconds}});
     }
     return {{"revision", current.revision},
-      {"camera", {{"url", current.camera_url}, {"decoder", current.decoder}}},
+      {"camera", {{"source_type", current.camera_source_type},
+          {"url", current.camera_url}, {"decoder", current.decoder},
+          {"username", current.camera_username},
+          {"password_configured", !current.camera_password.empty()}}},
       {"model", {{"profile", current.model.profile},
           {"score_threshold", current.model.score_threshold},
           {"nms_iou", current.model.nms_iou}, {"input_width", 640},
-          {"input_height", 640}, {"runtime", "AWNN/VIPLite"}}},
+          {"input_height", 640}, {"runtime", "AWNN/VIPLite"},
+          {"classes", current.model.classes}}},
       {"tracking", {{"low_confidence", current.tracking.low_confidence},
           {"high_confidence", current.tracking.high_confidence},
           {"new_track_confidence", current.tracking.new_track_confidence},
@@ -280,6 +286,23 @@ struct CoreApiServer::Impl {
           {"end_confirm_seconds", current.motion.end_confirm},
           {"lost_grace_seconds", current.motion.lost_grace},
           {"max_gap_seconds", current.motion.max_gap}}},
+      {"running_detection", {{"enabled", current.running_detection.enabled},
+          {"mode", "body_heights_per_second"},
+          {"start_threshold", current.running_detection.start},
+          {"end_threshold", current.running_detection.end},
+          {"window_seconds", current.running_detection.window},
+          {"min_observations", current.running_detection.min_samples},
+          {"min_span_seconds", current.running_detection.min_span},
+          {"start_confirm_seconds", current.running_detection.start_confirm},
+          {"end_confirm_seconds", current.running_detection.end_confirm},
+          {"lost_grace_seconds", current.running_detection.lost_grace},
+          {"max_gap_seconds", current.running_detection.max_gap}}},
+      {"crowd", {{"enabled", current.crowd.enabled},
+          {"trigger_people", current.crowd.trigger_people},
+          {"clear_people", current.crowd.clear_people},
+          {"enter_confirm_seconds", current.crowd.enter_confirm},
+          {"exit_confirm_seconds", current.crowd.exit_confirm},
+          {"max_observation_gap_seconds", current.crowd.max_gap}}},
       {"preview", {{"fps", current.preview.fps}, {"max_width", current.preview.max_width},
           {"quality", current.preview.quality}, {"max_clients", current.preview.max_clients}}},
       {"storage", {{"retention_days", current.storage.retention_days},
@@ -421,14 +444,28 @@ struct CoreApiServer::Impl {
         Json request_json;
         try { request_json = Json::parse(body); }
         catch (const Json::exception&) { throw std::invalid_argument("Invalid JSON body"); }
-        if (!request_json.is_object() || request_json.size() != 2 ||
+        if (!request_json.is_object() ||
             !request_json.contains("revision") || !request_json["revision"].is_number_integer() ||
-            !request_json.contains("camera") || !request_json["camera"].is_object() ||
-            request_json["camera"].size() != 1 || !request_json["camera"].contains("url") ||
-            !request_json["camera"]["url"].is_string())
-          throw std::invalid_argument("Expected revision and camera.url");
-        const auto result = config->update_camera_url(
-            request_json["camera"]["url"].get<std::string>(),
+            !request_json.contains("camera") || !request_json["camera"].is_object())
+          throw std::invalid_argument("Expected revision and camera settings");
+        const auto& camera = request_json["camera"];
+        const auto get_string = [&](const char* key, const std::string& fallback) {
+          if (!camera.contains(key)) return fallback;
+          if (!camera[key].is_string()) throw std::invalid_argument(std::string("camera.") + key + " must be a string");
+          return camera[key].get<std::string>();
+        };
+        const auto current = config->current();
+        std::optional<std::string> password;
+        if (camera.contains("password")) {
+          if (camera["password"].is_null()) password = std::string{};
+          else if (camera["password"].is_string()) password = camera["password"].get<std::string>();
+          else throw std::invalid_argument("camera.password must be a string or null");
+        }
+        const auto result = config->update_camera(
+            get_string("source_type", current.camera_source_type),
+            get_string("url", current.camera_url),
+            get_string("decoder", current.decoder),
+            get_string("username", current.camera_username), password,
             request_json["revision"].get<int>());
         if (result.status != 202) {
           send_json(fd, result.status, {{"error", result.error},
@@ -436,7 +473,10 @@ struct CoreApiServer::Impl {
           return;
         }
         send_json(fd, 202, {{"revision", result.config.revision},
-            {"camera", {{"url", result.config.camera_url}}},
+            {"camera", {{"source_type", result.config.camera_source_type},
+                {"url", result.config.camera_url}, {"decoder", result.config.decoder},
+                {"username", result.config.camera_username},
+                {"password_configured", !result.config.camera_password.empty()}}},
             {"state", "reconnecting"}});
         return;
       }
@@ -455,8 +495,15 @@ struct CoreApiServer::Impl {
               {"active", signal.active}, {"dwell_seconds", signal.dwell_seconds},
               {"target_seconds", signal.target_seconds}});
         }
+        Json crowd = Json::array();
+        for (const auto& signal : status.crowd) {
+          crowd.push_back({{"zone_id", signal.zone_id},
+              {"zone_name", signal.zone_name}, {"active", signal.active},
+              {"count", signal.count}, {"threshold", signal.threshold}});
+        }
         send_json(fd, 200, {{"core", "online"},
             {"camera", status.camera_connected ? "connected" : "disconnected"},
+            {"overlay_stale", status.overlay_stale},
             {"revision", current.revision}, {"ai_fps", status.ai_fps},
             {"inference_ms", status.inference_ms}, {"frame_id", status.frame_id},
             {"session_id", status.session_id}, {"message", status.message},
@@ -464,6 +511,7 @@ struct CoreApiServer::Impl {
             {"person_detections", status.person_detections},
             {"person_tracks", status.person_tracks},
             {"enabled_zones", status.enabled_zones}, {"loitering", loitering},
+            {"crowd", crowd},
             {"preview_sequence", preview.latest() ? preview.latest()->sequence : 0}});
         return;
       }
@@ -479,14 +527,15 @@ struct CoreApiServer::Impl {
       }
       if (route == "/api/events.csv") {
         const auto limit = bounded_int(query_value(path, "limit", "200"), 200, 1000);
-        std::string csv = "id,type,zone_id,started_utc,ended_utc,duration_seconds,end_reason\r\n";
+        std::string csv = "id,type,zone_id,started_utc,ended_utc,duration_seconds,end_reason,crowd_count,crowd_threshold\r\n";
         for (std::size_t offset = 0; events && offset < limit; offset += 200) {
           const auto rows = events->recent(offset, std::min<std::size_t>(200, limit - offset));
           for (const auto& row : rows) {
             csv += csv_escape(row.id) + ',' + csv_escape(row.type) + ',' +
                 csv_escape(row.zone_id) + ',' + csv_escape(row.started_utc) + ',' +
                 csv_escape(row.ended_utc) + ',' + std::to_string(row.duration_seconds) + ',' +
-                csv_escape(row.end_reason) + "\r\n";
+                csv_escape(row.end_reason) + ',' + std::to_string(row.crowd_count) + ',' +
+                std::to_string(row.crowd_threshold) + "\r\n";
           }
           if (rows.size() < std::min<std::size_t>(200, limit - offset)) break;
         }

@@ -65,6 +65,19 @@ void bind_text(sqlite3_stmt* statement, int index, const std::string& value) {
                sqlite3_db_handle(statement), "bind text");
 }
 
+bool has_column(sqlite3* db, const char* table, const char* column) {
+  const std::string sql = std::string("PRAGMA table_info(") + table + ")";
+  Statement statement(db, sql.c_str());
+  for (;;) {
+    const int code = sqlite3_step(statement.get());
+    if (code == SQLITE_DONE) return false;
+    check_sqlite(code, db, "inspect table columns");
+    const auto* name = sqlite3_column_text(statement.get(), 1);
+    if (name && std::string(reinterpret_cast<const char*>(name)) == column)
+      return true;
+  }
+}
+
 }  // namespace
 
 struct EventStore::Impl {
@@ -100,6 +113,7 @@ struct EventStore::Impl {
       chmod((database_path + "-shm").c_str(), S_IRUSR | S_IWUSR);
       exec(db_, "CREATE TABLE IF NOT EXISTS events ("
               "id TEXT PRIMARY KEY, session_id TEXT NOT NULL, track_id INTEGER NOT NULL,"
+              "crowd_count INTEGER NOT NULL DEFAULT 0,crowd_threshold INTEGER NOT NULL DEFAULT 0,"
               "type TEXT NOT NULL, zone_id TEXT NOT NULL DEFAULT '',"
               "started_utc TEXT NOT NULL, ended_utc TEXT, duration_seconds REAL NOT NULL DEFAULT 0,"
               "dwell_seconds REAL NOT NULL DEFAULT 0, peak_speed REAL NOT NULL DEFAULT 0,"
@@ -107,6 +121,10 @@ struct EventStore::Impl {
               "active INTEGER NOT NULL, snapshot_state TEXT NOT NULL DEFAULT 'none',"
               "snapshot_path TEXT NOT NULL DEFAULT '');"
               "CREATE INDEX IF NOT EXISTS events_started_idx ON events(started_utc DESC);");
+      if (!has_column(db_, "events", "crowd_count"))
+        exec(db_, "ALTER TABLE events ADD COLUMN crowd_count INTEGER NOT NULL DEFAULT 0");
+      if (!has_column(db_, "events", "crowd_threshold"))
+        exec(db_, "ALTER TABLE events ADD COLUMN crowd_threshold INTEGER NOT NULL DEFAULT 0");
       // An active row cannot remain active after the process has restarted.
       Statement recover(db_, "UPDATE events SET active=0, ended_utc=?,"
                            "end_reason='process_restarted',"
@@ -145,8 +163,9 @@ struct EventStore::Impl {
     const Event& event = transition.event;
     if (transition.started) {
       Statement statement(db_, "INSERT INTO events(id,session_id,track_id,type,zone_id,"
-          "started_utc,dwell_seconds,peak_speed,speed_unit,active,snapshot_state)"
-          " VALUES(?,?,?,?,?,?,?,?,?,1,'none') ON CONFLICT(id) DO NOTHING");
+          "started_utc,dwell_seconds,peak_speed,speed_unit,active,snapshot_state,"
+          "crowd_count,crowd_threshold)"
+          " VALUES(?,?,?,?,?,?,?,?,?,1,'none',?,?) ON CONFLICT(id) DO NOTHING");
       bind_text(statement.get(), 1, event.id);
       bind_text(statement.get(), 2, event.session_id);
       check_sqlite(sqlite3_bind_int(statement.get(), 3, event.track_id), db_, "bind track");
@@ -156,19 +175,24 @@ struct EventStore::Impl {
       check_sqlite(sqlite3_bind_double(statement.get(), 7, event.dwell_seconds), db_, "bind dwell");
       check_sqlite(sqlite3_bind_double(statement.get(), 8, event.peak_speed), db_, "bind peak speed");
       bind_text(statement.get(), 9, event.speed_unit);
+      check_sqlite(sqlite3_bind_int(statement.get(), 10, event.crowd_count), db_, "bind crowd count");
+      check_sqlite(sqlite3_bind_int(statement.get(), 11, event.crowd_threshold), db_, "bind crowd threshold");
       check_sqlite(sqlite3_step(statement.get()), db_, "insert event");
     } else {
       const double duration = std::max(0.0,
           std::chrono::duration<double>(event.ended - event.started).count());
       Statement statement(db_, "UPDATE events SET ended_utc=?,duration_seconds=?,"
-          "dwell_seconds=?,peak_speed=?,speed_unit=?,end_reason=?,active=0 WHERE id=?");
+          "dwell_seconds=?,peak_speed=?,speed_unit=?,end_reason=?,active=0,"
+          "crowd_count=?,crowd_threshold=? WHERE id=?");
       bind_text(statement.get(), 1, utc_iso(event.ended_utc));
       check_sqlite(sqlite3_bind_double(statement.get(), 2, duration), db_, "bind duration");
       check_sqlite(sqlite3_bind_double(statement.get(), 3, event.dwell_seconds), db_, "bind dwell");
       check_sqlite(sqlite3_bind_double(statement.get(), 4, event.peak_speed), db_, "bind peak speed");
       bind_text(statement.get(), 5, event.speed_unit);
       bind_text(statement.get(), 6, event.reason);
-      bind_text(statement.get(), 7, event.id);
+      check_sqlite(sqlite3_bind_int(statement.get(), 7, event.crowd_count), db_, "bind crowd count");
+      check_sqlite(sqlite3_bind_int(statement.get(), 8, event.crowd_threshold), db_, "bind crowd threshold");
+      bind_text(statement.get(), 9, event.id);
       check_sqlite(sqlite3_step(statement.get()), db_, "end event");
       if (sqlite3_changes(db_) == 0)
         throw std::runtime_error("SQLite event end has no matching begin row: " + event.id);
@@ -217,6 +241,10 @@ struct EventStore::Impl {
             persist_delete_event(item);
             break;
         }
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          error_message.clear();
+        }
       } catch (const std::exception& error) {
         std::lock_guard<std::mutex> lock(mutex);
         error_message = error.what();
@@ -262,6 +290,8 @@ bool EventStore::enqueue(EventTransition transition) {
   item.kind = Impl::WorkItem::Kind::Transition;
   item.transition = std::move(transition);
   p.queue.push_back(std::move(item));
+  if (p.error_message == "event writer queue remained full for 100 ms")
+    p.error_message.clear();
   p.ready.notify_one();
   return true;
 }
@@ -321,7 +351,7 @@ std::vector<StoredEvent> EventStore::recent(std::size_t offset,
   std::lock_guard<std::mutex> lock(p.database_mutex);
   Statement query(p.db_, "SELECT id,session_id,track_id,type,zone_id,started_utc,"
       "ended_utc,duration_seconds,dwell_seconds,peak_speed,speed_unit,end_reason,"
-      "active,snapshot_state,snapshot_path FROM events "
+      "active,snapshot_state,snapshot_path,crowd_count,crowd_threshold FROM events "
       "ORDER BY started_utc DESC,id DESC LIMIT ? OFFSET ?");
   check_sqlite(sqlite3_bind_int64(query.get(), 1, static_cast<sqlite3_int64>(limit)),
                p.db_, "bind event limit");
@@ -340,7 +370,8 @@ std::vector<StoredEvent> EventStore::recent(std::size_t offset,
         text(10), text(11), text(13), text(14),
         sqlite3_column_int(query.get(), 2), sqlite3_column_double(query.get(), 7),
         sqlite3_column_double(query.get(), 8), sqlite3_column_double(query.get(), 9),
-        sqlite3_column_int(query.get(), 12) != 0});
+        sqlite3_column_int(query.get(), 12) != 0,
+        sqlite3_column_int(query.get(), 15), sqlite3_column_int(query.get(), 16)});
   }
   return rows;
 }
@@ -354,12 +385,13 @@ StoredEvent read_stored_event(sqlite3_stmt* statement) {
   return {text(0), text(1), text(3), text(4), text(5), text(6),
       text(10), text(11), text(13), text(14), sqlite3_column_int(statement, 2),
       sqlite3_column_double(statement, 7), sqlite3_column_double(statement, 8),
-      sqlite3_column_double(statement, 9), sqlite3_column_int(statement, 12) != 0};
+      sqlite3_column_double(statement, 9), sqlite3_column_int(statement, 12) != 0,
+      sqlite3_column_int(statement, 15), sqlite3_column_int(statement, 16)};
 }
 constexpr const char* kEventSelect =
     "SELECT id,session_id,track_id,type,zone_id,started_utc,ended_utc,"
     "duration_seconds,dwell_seconds,peak_speed,speed_unit,end_reason,active,"
-    "snapshot_state,snapshot_path FROM events ";
+    "snapshot_state,snapshot_path,crowd_count,crowd_threshold FROM events ";
 }  // namespace
 
 std::optional<StoredEvent> EventStore::get(const std::string& event_id) const {

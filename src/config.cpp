@@ -53,15 +53,14 @@ std::string string_value(const Json& object, const char* name,
   return it->get<std::string>();
 }
 
-void validate_rtsp_url(const std::string& url) {
-  const std::size_t authority_begin = url.rfind("rtsp://", 0) == 0 ? 7 :
-      url.rfind("rtsps://", 0) == 0 ? 8 : std::string::npos;
-  if (authority_begin == std::string::npos)
-    throw std::invalid_argument("camera.url must use RTSP or RTSPS");
-  if (url.empty() || std::any_of(url.begin(), url.end(), [](unsigned char c) {
+void validate_network_url(const std::string& url, const std::string& scheme) {
+  const std::size_t authority_begin = scheme.size() + 3;
+  if (url.rfind(scheme + "://", 0) != 0)
+    throw std::invalid_argument("camera.url does not match camera.source_type");
+  if (std::any_of(url.begin(), url.end(), [](unsigned char c) {
         return std::isspace(c) || std::iscntrl(c);
       }))
-    throw std::invalid_argument("camera.url must not contain whitespace");
+    throw std::invalid_argument("camera.url must not contain control characters");
   const auto authority_end = url.find_first_of("/?#", authority_begin);
   const std::string authority = url.substr(authority_begin,
       authority_end == std::string::npos ? std::string::npos : authority_end - authority_begin);
@@ -111,6 +110,30 @@ void validate_rtsp_url(const std::string& url) {
   }
 }
 
+void validate_camera_source(const std::string& type, const std::string& url) {
+  if (url.empty()) throw std::invalid_argument("camera.url must not be empty");
+  if (type == "rtsp") {
+    if (url.rfind("rtsp://", 0) == 0) validate_network_url(url, "rtsp");
+    else if (url.rfind("rtsps://", 0) == 0) validate_network_url(url, "rtsps");
+    else throw std::invalid_argument("RTSP source must use rtsp:// or rtsps://");
+  } else if (type == "video_url") {
+    if (url.rfind("http://", 0) == 0) validate_network_url(url, "http");
+    else if (url.rfind("https://", 0) == 0) validate_network_url(url, "https");
+    else throw std::invalid_argument("Video URL must use http:// or https://");
+  } else if (type == "file") {
+    if (url.rfind("file:///", 0) == 0) {
+      if (url.size() <= 8)
+        throw std::invalid_argument("camera.url is not a valid file URI");
+    } else if (url.rfind("file://", 0) == 0) {
+      throw std::invalid_argument("Video file URI must refer to a local path");
+    } else if (url.front() != '/') {
+      throw std::invalid_argument("Video file path must be absolute");
+    }
+  } else {
+    throw std::invalid_argument("camera.source_type must be rtsp, video_url, or file");
+  }
+}
+
 }  // namespace
 
 RuntimeConfig parse_runtime_config(const std::string& json_text) {
@@ -119,7 +142,7 @@ RuntimeConfig parse_runtime_config(const std::string& json_text) {
   catch (const Json::exception& error) {
     throw std::invalid_argument(std::string("Invalid runtime config JSON: ") + error.what());
   }
-  keys_only(root, {"revision", "camera", "model", "tracking", "zones", "running", "preview", "storage", "loitering"}, "config");
+  keys_only(root, {"revision", "camera", "model", "tracking", "zones", "running", "running_detection", "crowd", "preview", "storage", "loitering"}, "config");
   RuntimeConfig result;
   if (root.contains("revision")) {
     if (!root["revision"].is_number_integer() || root["revision"].get<int>() < 0)
@@ -128,10 +151,29 @@ RuntimeConfig parse_runtime_config(const std::string& json_text) {
   }
   if (root.contains("camera")) {
     const auto& camera = root["camera"];
-    keys_only(camera, {"url", "decoder"}, "camera");
+    keys_only(camera, {"source_type", "url", "decoder", "username", "password",
+                       "password_configured", "credentials_explicit"}, "camera");
+    result.camera_source_type = string_value(camera, "source_type", result.camera_source_type);
     result.camera_url = string_value(camera, "url", result.camera_url);
     result.decoder = string_value(camera, "decoder", result.decoder);
-    validate_rtsp_url(result.camera_url);
+    result.camera_username = string_value(camera, "username", result.camera_username);
+    if (camera.contains("password")) {
+      if (camera["password"].is_null()) result.camera_password.clear();
+      else if (camera["password"].is_string())
+        result.camera_password = camera["password"].get<std::string>();
+      else throw std::invalid_argument("camera.password must be a string or null");
+    }
+    if (camera.contains("credentials_explicit")) {
+      if (!camera["credentials_explicit"].is_boolean())
+        throw std::invalid_argument("camera.credentials_explicit must be boolean");
+      result.camera_credentials_explicit = camera["credentials_explicit"].get<bool>();
+    } else {
+      // Backward-compatible migration: existing non-empty credentials were
+      // explicitly saved; empty fields still permit legacy env fallback.
+      result.camera_credentials_explicit = !result.camera_username.empty() ||
+          !result.camera_password.empty();
+    }
+    validate_camera_source(result.camera_source_type, result.camera_url);
     if (result.decoder.empty()) throw std::invalid_argument("camera.decoder must not be empty");
     if (result.decoder != "omxh264dec" && result.decoder != "avdec_h264")
       throw std::invalid_argument("camera.decoder must be omxh264dec or avdec_h264");
@@ -139,7 +181,7 @@ RuntimeConfig parse_runtime_config(const std::string& json_text) {
 
   if (root.contains("model")) {
     const auto& value = root["model"];
-    keys_only(value, {"profile", "score_threshold", "nms_iou", "input_width",
+    keys_only(value, {"profile", "score_threshold", "nms_iou", "classes", "input_width",
         "input_height", "runtime"}, "model");
     result.model.profile = string_value(value, "profile", result.model.profile);
     if (result.model.profile != "yolov5-a733-640")
@@ -152,6 +194,21 @@ RuntimeConfig parse_runtime_config(const std::string& json_text) {
       result.model.score_threshold = static_cast<float>(number(value["score_threshold"], "model.score_threshold"));
     if (value.contains("nms_iou"))
       result.model.nms_iou = static_cast<float>(number(value["nms_iou"], "model.nms_iou"));
+    if (value.contains("classes")) {
+      const auto& classes = value["classes"];
+      if (!classes.is_array() || classes.empty())
+        throw std::invalid_argument("model.classes must be a non-empty array of COCO class IDs");
+      std::set<int> seen;
+      result.model.classes.clear();
+      for (const auto& item : classes) {
+        if (!item.is_number_integer())
+          throw std::invalid_argument("model.classes entries must be integer COCO IDs");
+        const int id = item.get<int>();
+        if (id < 0 || id >= 80 || !seen.insert(id).second)
+          throw std::invalid_argument("model.classes IDs must be unique values from 0 to 79");
+        result.model.classes.push_back(id);
+      }
+    }
     if (result.model.score_threshold < 0.0f || result.model.score_threshold > 1.0f ||
         result.model.nms_iou < 0.0f || result.model.nms_iou > 1.0f)
       throw std::invalid_argument("model thresholds must be between 0 and 1");
@@ -251,6 +308,47 @@ RuntimeConfig parse_runtime_config(const std::string& json_text) {
     if (value.contains("lost_grace_seconds")) result.motion.lost_grace = number(value["lost_grace_seconds"], "lost_grace_seconds");
     if (value.contains("max_gap_seconds")) result.motion.max_gap = number(value["max_gap_seconds"], "max_gap_seconds");
   }
+  if (root.contains("running_detection")) {
+    const auto& value = root["running_detection"];
+    keys_only(value, {"enabled", "mode", "start_threshold", "end_threshold", "window_seconds", "min_observations", "min_span_seconds", "start_confirm_seconds", "end_confirm_seconds", "lost_grace_seconds", "max_gap_seconds"}, "running_detection");
+    auto& running = result.running_detection;
+    running.enabled = optional_bool(value, "enabled", false);
+    const std::string mode = string_value(value, "mode", "body_heights_per_second");
+    if (mode != "body_heights_per_second")
+      throw std::invalid_argument("running_detection.mode must be body_heights_per_second");
+    if (value.contains("start_threshold")) running.start = number(value["start_threshold"], "running_detection.start_threshold");
+    if (value.contains("end_threshold")) running.end = number(value["end_threshold"], "running_detection.end_threshold");
+    if (value.contains("window_seconds")) running.window = number(value["window_seconds"], "running_detection.window_seconds");
+    if (value.contains("min_observations")) {
+      const auto& count = value["min_observations"];
+      if (!count.is_number_integer()) throw std::invalid_argument("running_detection.min_observations must be an integer");
+      running.min_samples = count.get<int>();
+    }
+    if (value.contains("min_span_seconds")) running.min_span = number(value["min_span_seconds"], "running_detection.min_span_seconds");
+    if (value.contains("start_confirm_seconds")) running.start_confirm = number(value["start_confirm_seconds"], "running_detection.start_confirm_seconds");
+    if (value.contains("end_confirm_seconds")) running.end_confirm = number(value["end_confirm_seconds"], "running_detection.end_confirm_seconds");
+    if (value.contains("lost_grace_seconds")) running.lost_grace = number(value["lost_grace_seconds"], "running_detection.lost_grace_seconds");
+    if (value.contains("max_gap_seconds")) running.max_gap = number(value["max_gap_seconds"], "running_detection.max_gap_seconds");
+  }
+  if (root.contains("crowd")) {
+    const auto& value = root["crowd"];
+    keys_only(value, {"enabled", "trigger_people", "clear_people", "enter_confirm_seconds", "exit_confirm_seconds", "max_observation_gap_seconds"}, "crowd");
+    auto& crowd = result.crowd;
+    crowd.enabled = optional_bool(value, "enabled", false);
+    if (value.contains("trigger_people")) {
+      if (!value["trigger_people"].is_number_integer())
+        throw std::invalid_argument("crowd.trigger_people must be an integer");
+      crowd.trigger_people = value["trigger_people"].get<int>();
+    }
+    if (value.contains("clear_people")) {
+      if (!value["clear_people"].is_number_integer())
+        throw std::invalid_argument("crowd.clear_people must be an integer");
+      crowd.clear_people = value["clear_people"].get<int>();
+    }
+    if (value.contains("enter_confirm_seconds")) crowd.enter_confirm = number(value["enter_confirm_seconds"], "crowd.enter_confirm_seconds");
+    if (value.contains("exit_confirm_seconds")) crowd.exit_confirm = number(value["exit_confirm_seconds"], "crowd.exit_confirm_seconds");
+    if (value.contains("max_observation_gap_seconds")) crowd.max_gap = number(value["max_observation_gap_seconds"], "crowd.max_observation_gap_seconds");
+  }
   if (root.contains("preview")) {
     const auto& value = root["preview"];
     keys_only(value, {"fps", "max_width", "quality", "max_clients"}, "preview");
@@ -277,7 +375,9 @@ RuntimeConfig parse_runtime_config(const std::string& json_text) {
   // Constructors own the canonical threshold validation.
   LoiteringEngine checked_loiter(result.loitering);
   MotionEngine checked_motion(result.motion);
-  (void)checked_loiter; (void)checked_motion;
+  MotionEngine checked_running(result.running_detection);
+  CrowdEngine checked_crowd(result.crowd);
+  (void)checked_loiter; (void)checked_motion; (void)checked_running; (void)checked_crowd;
   return result;
 }
 
@@ -300,10 +400,13 @@ std::string serialize_runtime_config(const RuntimeConfig& config) {
   }
   Json root = {
     {"revision", config.revision},
-    {"camera", {{"url", config.camera_url}, {"decoder", config.decoder}}},
+    {"camera", {{"source_type", config.camera_source_type}, {"url", config.camera_url},
+      {"decoder", config.decoder}, {"username", config.camera_username},
+      {"password", config.camera_password},
+      {"credentials_explicit", config.camera_credentials_explicit}}},
     {"model", {{"profile", config.model.profile},
       {"score_threshold", config.model.score_threshold},
-      {"nms_iou", config.model.nms_iou}}},
+      {"nms_iou", config.model.nms_iou}, {"classes", config.model.classes}}},
     {"tracking", {{"low_confidence", config.tracking.low_confidence},
       {"high_confidence", config.tracking.high_confidence},
       {"new_track_confidence", config.tracking.new_track_confidence},
@@ -333,6 +436,25 @@ std::string serialize_runtime_config(const RuntimeConfig& config) {
       {"end_confirm_seconds", config.motion.end_confirm},
       {"lost_grace_seconds", config.motion.lost_grace},
       {"max_gap_seconds", config.motion.max_gap}}},
+    {"running_detection", {
+      {"enabled", config.running_detection.enabled},
+      {"mode", "body_heights_per_second"},
+      {"start_threshold", config.running_detection.start},
+      {"end_threshold", config.running_detection.end},
+      {"window_seconds", config.running_detection.window},
+      {"min_observations", config.running_detection.min_samples},
+      {"min_span_seconds", config.running_detection.min_span},
+      {"start_confirm_seconds", config.running_detection.start_confirm},
+      {"end_confirm_seconds", config.running_detection.end_confirm},
+      {"lost_grace_seconds", config.running_detection.lost_grace},
+      {"max_gap_seconds", config.running_detection.max_gap}}},
+    {"crowd", {
+      {"enabled", config.crowd.enabled},
+      {"trigger_people", config.crowd.trigger_people},
+      {"clear_people", config.crowd.clear_people},
+      {"enter_confirm_seconds", config.crowd.enter_confirm},
+      {"exit_confirm_seconds", config.crowd.exit_confirm},
+      {"max_observation_gap_seconds", config.crowd.max_gap}}},
     {"preview", {{"fps", config.preview.fps},
       {"max_width", config.preview.max_width}, {"quality", config.preview.quality},
       {"max_clients", config.preview.max_clients}}},
@@ -388,15 +510,24 @@ RuntimeConfig RuntimeConfigController::current() const {
   return config_;
 }
 
-RuntimeConfigUpdateResult RuntimeConfigController::update_camera_url(
-    const std::string& url, int expected_revision) {
+RuntimeConfigUpdateResult RuntimeConfigController::update_camera(
+    const std::string& source_type, const std::string& url, const std::string& decoder,
+    const std::string& username, const std::optional<std::string>& password,
+    int expected_revision) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (expected_revision != config_.revision)
     return {409, config_, "Configuration revision conflict; reload the current settings"};
   if (config_.revision == std::numeric_limits<int>::max())
     return {409, config_, "Configuration revision limit reached; restart the core"};
   RuntimeConfig candidate = config_;
+  candidate.camera_source_type = source_type;
   candidate.camera_url = url;
+  candidate.decoder = decoder;
+  candidate.camera_username = username;
+  candidate.camera_credentials_explicit = true;
+  if (password) {
+    candidate.camera_password = *password;
+  }
   ++candidate.revision;
   try {
     candidate = parse_runtime_config(serialize_runtime_config(candidate));
@@ -424,6 +555,11 @@ RuntimeConfigUpdateResult RuntimeConfigController::update_behavior_config(
         root["revision"].get<int>() != expected_revision)
       return {409, config_, "Configuration revision conflict; reload the current settings"};
     root["revision"] = config_.revision + 1;
+    if (root.contains("camera") && root["camera"].is_object()) {
+      if (!root["camera"].contains("password"))
+        root["camera"]["password"] = config_.camera_password;
+      root["camera"]["credentials_explicit"] = config_.camera_credentials_explicit;
+    }
     RuntimeConfig candidate = parse_runtime_config(root.dump());
     std::string error;
     if (!write_config_atomically(path_, serialize_runtime_config(candidate), error))

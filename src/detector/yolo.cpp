@@ -42,7 +42,7 @@ namespace aibox
         const float uni = a.w * a.h + b.w * b.h - inter;
         return uni > 0 ? inter / uni : 0;
     }
-    std::vector<Detection> decode_yolov5(const std::vector<YoloHead> &heads, const Letterbox &t, float threshold, float nms, bool person_only)
+    std::vector<Detection> decode_yolov5(const std::vector<YoloHead> &heads, const Letterbox &t, float threshold, float nms, const std::vector<int>& class_ids)
     {
         static constexpr std::array<int, 3> strides{8, 16, 32};
         static constexpr float anchors[3][3][2] = {{{10, 13}, {16, 30}, {33, 23}}, {{30, 61}, {62, 45}, {59, 119}}, {{116, 90}, {156, 198}, {373, 326}}};
@@ -50,6 +50,14 @@ namespace aibox
             throw std::invalid_argument("Invalid YOLO decoder contract");
         if (heads.size() != 3)
             throw std::invalid_argument("YOLOv5 COCO requires three output heads");
+        if (class_ids.empty())
+            throw std::invalid_argument("At least one COCO class must be selected");
+        std::array<bool, 80> selected{};
+        for (const int id : class_ids) {
+            if (id < 0 || id >= static_cast<int>(selected.size()))
+                throw std::invalid_argument("COCO class id must be between 0 and 79");
+            selected[static_cast<std::size_t>(id)] = true;
+        }
         std::vector<Detection> candidates;
         for (int level = 0; level < 3; ++level)
         {
@@ -69,11 +77,11 @@ namespace aibox
                         const std::size_t off = ((static_cast<std::size_t>(a) * gh + y) * gw + x) * 85;
                         const float *v = it->data + off;
                         const float obj = sigmoid(v[4]);
-                        int cls = 0;
+                        int cls = -1;
                         float cp = 0;
-                        const int first = person_only ? 0 : 0, last = person_only ? 1 : 80;
-                        for (int c = first; c < last; ++c)
+                        for (int c = 0; c < static_cast<int>(selected.size()); ++c)
                         {
+                            if (!selected[static_cast<std::size_t>(c)]) continue;
                             float q = sigmoid(v[5 + c]);
                             if (q > cp)
                             {
@@ -81,6 +89,7 @@ namespace aibox
                                 cls = c;
                             }
                         }
+                        if (cls < 0) continue;
                         const float conf = obj * cp;
                         if (conf < threshold)
                             continue;
@@ -96,9 +105,15 @@ namespace aibox
         }
         std::sort(candidates.begin(), candidates.end(), [](const Detection &a, const Detection &b)
                   { return a.confidence > b.confidence; });
+        // Bound CPU work and tracker load when many COCO classes are enabled.
+        constexpr std::size_t kMaxNmsCandidates = 3000;
+        constexpr std::size_t kMaxDetections = 300;
+        if (candidates.size() > kMaxNmsCandidates)
+            candidates.resize(kMaxNmsCandidates);
         std::vector<Detection> kept;
         for (const auto &d : candidates)
         {
+            if (kept.size() >= kMaxDetections) break;
             bool accept = true;
             for (const auto &k : kept)
                 if (d.class_id == k.class_id && iou(d.box, k.box) > nms)
@@ -110,5 +125,14 @@ namespace aibox
                 kept.push_back(d);
         }
         return kept;
+    }
+
+    std::vector<Detection> decode_yolov5(const std::vector<YoloHead>& heads,
+        const Letterbox& transform, float threshold, float nms, bool person_only) {
+        if (person_only)
+            return decode_yolov5(heads, transform, threshold, nms, std::vector<int>{0});
+        std::vector<int> all_classes(80);
+        for (int id = 0; id < 80; ++id) all_classes[static_cast<std::size_t>(id)] = id;
+        return decode_yolov5(heads, transform, threshold, nms, all_classes);
     }
 }

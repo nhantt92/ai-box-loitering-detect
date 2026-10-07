@@ -3,14 +3,15 @@
 #include "aibox/engines.hpp"
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 
 namespace aibox {
 
 struct PreviewConfig {
-  int fps{5};
-  int max_width{640};
-  int quality{70};
+  int fps{10};
+  int max_width{1280};
+  int quality{82};
   int max_clients{3};
 };
 
@@ -23,6 +24,7 @@ struct ModelConfig {
   std::string profile{"yolov5-a733-640"};
   float score_threshold{0.01f};
   float nms_iou{0.45f};
+  std::vector<int> classes{0};
 };
 
 struct TrackingSettings {
@@ -41,13 +43,28 @@ struct TrackingSettings {
 
 struct RuntimeConfig {
   int revision{};
+  std::string camera_source_type{"rtsp"};
   std::string camera_url{"rtsp://192.168.1.6:554/profile2"};
   std::string decoder{"omxh264dec"};
+  std::string camera_username;
+  std::string camera_password;
+  // True once a config/UI explicitly manages credentials, including an
+  // intentionally empty username or password. False permits legacy fallback.
+  bool camera_credentials_explicit{};
   ModelConfig model;
   TrackingSettings tracking;
   std::vector<Zone> zones;
   LoiterConfig loitering;
   MotionConfig motion;
+  MotionConfig running_detection = [] {
+    MotionConfig value;
+    value.start = 3.6;
+    value.end = 2.8;
+    value.start_confirm = 0.4;
+    value.end_confirm = 0.8;
+    return value;
+  }();
+  CrowdConfig crowd;
   PreviewConfig preview;
   StorageConfig storage;
 };
@@ -66,8 +83,10 @@ class RuntimeConfigController {
  public:
   RuntimeConfigController(RuntimeConfig initial, std::string path);
   RuntimeConfig current() const;
-  RuntimeConfigUpdateResult update_camera_url(const std::string& url,
-                                               int expected_revision);
+  RuntimeConfigUpdateResult update_camera(const std::string& source_type,
+      const std::string& url, const std::string& decoder,
+      const std::string& username, const std::optional<std::string>& password,
+      int expected_revision);
   RuntimeConfigUpdateResult update_behavior_config(const std::string& json_text,
                                                     int expected_revision);
 

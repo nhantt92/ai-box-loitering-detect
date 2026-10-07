@@ -139,12 +139,18 @@ export AIBOX_RTSP_USER=admin
 read -rsp 'RTSP password: ' AIBOX_RTSP_PASSWORD
 printf '\n'
 export AIBOX_RTSP_PASSWORD
+# Optional: increase buffering if the LAN/camera drops packets
+# export AIBOX_RTSP_LATENCY_MS=200
 ./build-board/ai-box-core
 ```
 
+RTSP capture and NPU inference run on separate threads. When the NPU is busy, old decoded frames are discarded and HDMI/web display continues with the newest camera image and the latest available detection overlay. The reported AI FPS is inference speed, so it can be lower than the camera/display frame rate. RTSP jitter latency defaults to the tested 200 ms; adjust `AIBOX_RTSP_LATENCY_MS` between 50 and 1000 ms if you want to tune responsiveness versus network jitter tolerance. Larger values add buffering latency.
+
+The browser preview defaults to 1280 px maximum width, JPEG quality 82 and 10 FPS. These settings affect only the web stream, not NPU inference. On an existing board config, set them from **Tracking / Performance** and save; existing saved values are retained across upgrades. The Live page reports the actual JPEG dimensions. If it remains at 640×360 after increasing the preview width, the camera RTSP profile itself is likely a low-resolution substream; select the camera's higher-resolution main profile in **Camera / System**. If playback then stutters over Wi-Fi, reduce preview FPS first, then width or JPEG quality.
+
 By default the core reads `config/example.json` and writes event rows to `./data/events.sqlite3`; it writes event-start snapshots under `./data/snapshots`. Override with `AIBOX_CONFIG_PATH`, `AIBOX_DATA`, or `AIBOX_EVENT_DB`. Snapshots are queued off the inference path and are limited by the config's `retention_days` and `max_snapshot_bytes`.
 
-To change the RTSP URL while the app is running, open the authenticated dashboard's **Camera / System** page and save the new URL, for example `rtsp://192.168.1.6:554/profile2`. The core validates and persists it, then reconnects. Do not include username/password in the URL. `AIBOX_RTSP_URL` is a startup override; leave it unset when the web-saved URL should be used after restarting the core. For repeated tests, put `AIBOX_RTSP_USER` and `AIBOX_RTSP_PASSWORD` in a private environment file with mode `0600`; do not put credentials in command-line arguments or checked-in files.
+To change the input while the app is running, open **Camera / System**, select RTSP/RTSPS, HTTP(S) video URL or local video file, then enter the address/path and optional username/password. Save to persist and reconnect. Do not include credentials in the URL. The password is kept in the core config file with owner-only permissions and is never returned by the API. URI/file input uses GStreamer's `uridecodebin`; the required demuxer and decoder plugins must be installed. Local video files loop at end of stream. `AIBOX_RTSP_USER` and `AIBOX_RTSP_PASSWORD` are startup fallbacks only until credentials are managed in config; saving camera settings, including empty credentials, suppresses both fallbacks after restart. `AIBOX_RTSP_URL` is ignored so it cannot override a saved web setting.
 
 If the selected decoder plugin is unavailable, the process reports the missing element. The config accepts `omxh264dec` (the tested hardware path) or `avdec_h264` (requires the libav plugin). If the camera cannot connect or the stream stops, it reports a timeout and retries with backoff. If dynamic libraries fail to load, inspect `ldd build-board/ai-box-core` and add the actual SDK runtime directory to `LD_LIBRARY_PATH`.
 
@@ -162,7 +168,7 @@ python tools/setup_admin.py
 python -m uvicorn web.app:app --host 0.0.0.0 --port 8080 --workers 1
 ```
 
-Run the setup command and Uvicorn from the activated virtualenv so both use its Python 3 interpreter. After signing in, open **Camera / System**, edit **RTSP stream URL**, and select **Save and reconnect**. The camera can take several seconds to reconnect; status and live preview update when frames resume.
+Run the setup command and Uvicorn from the activated virtualenv so both use its Python 3 interpreter. After signing in, open **Camera / System**, choose a source type, enter the URL or local video path and optional credentials, then select **Save and apply settings**. The source can take several seconds to connect; status and live preview update when frames resume.
 
 Open `http://192.168.1.34:8080` and sign in with the administrator password created by `setup_admin.py`. A snapshot appears after a loitering or fast-motion event starts; the default config has no zone and fast-motion disabled, so configure a measured zone before expecting an event image. The board run is still required to verify event creation, snapshot permissions, web retrieval and retention end to end.
 

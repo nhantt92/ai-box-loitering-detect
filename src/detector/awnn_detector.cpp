@@ -147,7 +147,8 @@ namespace aibox
         }
     }
     std::vector<Detection> AwnnDetector::detect(const cv::Mat &frame, float threshold,
-                                               float nms_iou)
+                                               float nms_iou,
+                                               const std::vector<int>& class_ids)
     {
         auto prepared = prepare_yolov5(frame, 640);
         void *input[] = {prepared.chw.data()};
@@ -167,6 +168,6 @@ namespace aibox
                 throw std::runtime_error("AWNN output tensor is null");
             heads.push_back({impl_->strides[i], outputs[i], count[i]});
         }
-        return decode_yolov5(heads, prepared.transform, threshold, nms_iou, true);
+        return decode_yolov5(heads, prepared.transform, threshold, nms_iou, class_ids);
     }
 }

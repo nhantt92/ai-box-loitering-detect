@@ -14,6 +14,7 @@ namespace aibox {
 
 struct CoreStatus {
   bool camera_connected{};
+  bool overlay_stale{};
   double ai_fps{};
   double inference_ms{};
   std::uint64_t frame_id{};
@@ -24,6 +25,7 @@ struct CoreStatus {
   std::size_t person_tracks{};
   std::size_t enabled_zones{};
   std::vector<BehaviorSignal> loitering;
+  std::vector<BehaviorSignal> crowd;
 };
 
 class CoreApiServer {

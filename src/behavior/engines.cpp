@@ -235,7 +235,10 @@ LoiterUpdate LoiteringEngine::update(const Zone& zone,
       s_ = LoiterState::Exiting;
       outside_elapsed_ = 0.0;
     } else if (s_ == LoiterState::Exiting) {
-      if (last_update_ && last_update_observed_ && !last_inside_ && !gap)
+      // Both endpoints were observed outside. Count the elapsed wall time
+      // between them even when it exceeds max_gap; otherwise slow inference
+      // can leave an active alarm stuck in Exiting forever.
+      if (last_update_ && last_update_observed_ && !last_inside_)
         outside_elapsed_ += dt;
       if (outside_elapsed_ < c_.exit_confirm) {
         // Keep the episode alive until observed outside time is sufficient.
@@ -404,6 +407,67 @@ MotionUpdate MotionEngine::update(const Observation& observation) {
   } else {
     above_elapsed_ = 0.0;
     below_elapsed_ = 0.0;
+  }
+  result.active = active_;
+  return result;
+}
+
+CrowdEngine::CrowdEngine(CrowdConfig config) : c_(config) {
+  require_nonnegative_finite(c_.enter_confirm, "crowd enter confirmation");
+  require_nonnegative_finite(c_.exit_confirm, "crowd exit confirmation");
+  if (c_.trigger_people < 1 || c_.clear_people < 0 ||
+      c_.clear_people >= c_.trigger_people || !std::isfinite(c_.max_gap) ||
+      c_.max_gap <= 0.0)
+    throw std::invalid_argument("Invalid crowd thresholds or observation gap");
+}
+
+CrowdUpdate CrowdEngine::reset(const std::string& reason) {
+  CrowdUpdate result;
+  result.ended = active_;
+  result.active = false;
+  result.reason = active_ ? reason : std::string{};
+  active_ = false;
+  last_.reset();
+  above_elapsed_ = below_elapsed_ = 0.0;
+  return result;
+}
+
+CrowdUpdate CrowdEngine::update(int people, Mono at) {
+  if (people < 0) throw std::invalid_argument("Crowd count cannot be negative");
+  if (!c_.enabled) return reset("config_changed");
+  CrowdUpdate result;
+  result.people = people;
+  result.active = active_;
+  if (last_ && at <= *last_) return reset("invalid_timestamp");
+  if (!last_) {
+    last_ = at;
+    return result;
+  }
+  const double dt = std::chrono::duration<double>(at - *last_).count();
+  last_ = at;
+  if (dt > c_.max_gap) {
+    above_elapsed_ = below_elapsed_ = 0.0;
+    return result;
+  }
+  if (!active_ && people >= c_.trigger_people) {
+    above_elapsed_ += dt;
+    below_elapsed_ = 0.0;
+    if (above_elapsed_ >= c_.enter_confirm) {
+      active_ = true;
+      result.began = true;
+      above_elapsed_ = 0.0;
+    }
+  } else if (active_ && people <= c_.clear_people) {
+    below_elapsed_ += dt;
+    above_elapsed_ = 0.0;
+    if (below_elapsed_ >= c_.exit_confirm) {
+      active_ = false;
+      result.ended = true;
+      result.reason = "crowd_cleared";
+      below_elapsed_ = 0.0;
+    }
+  } else {
+    above_elapsed_ = below_elapsed_ = 0.0;
   }
   result.active = active_;
   return result;

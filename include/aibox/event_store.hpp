@@ -15,6 +15,7 @@ struct StoredEvent {
   int track_id{};
   double duration_seconds{}, dwell_seconds{}, peak_speed{};
   bool active{};
+  int crowd_count{}, crowd_threshold{};
 };
 
 class EventStore {

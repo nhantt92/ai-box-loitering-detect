@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="150" viewBox="0 0 520 150" role="img" aria-labelledby="title">
+  <title id="title">AMPACS Corporation</title>
+  <g fill="none" stroke="#ff304f" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 78h38l12-23 13 46 16-94 18 126 17-105 14 50 13-28 13 28 13-17 15 17h20"
+          stroke-width="8"/>
+    <path d="M218 78h277" stroke-width="8"/>
+  </g>
+  <g fill="#f5f7fb" font-family="Arial, Helvetica, sans-serif" font-weight="800">
+    <text x="238" y="60" font-size="55" letter-spacing="-1.8">AMPACS</text>
+    <text x="239" y="119" font-size="34" letter-spacing="-.8">CORPORATION</text>
+  </g>
+</svg>

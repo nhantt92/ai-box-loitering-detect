@@ -37,4 +37,29 @@ class MotionEngine {
   double above_elapsed_{}, below_elapsed_{}, speed_{};
   bool last_observation_valid_{};
 };
+struct CrowdConfig {
+  bool enabled{false};
+  int trigger_people{5};
+  int clear_people{3};
+  double enter_confirm{1.0};
+  double exit_confirm{2.0};
+  double max_gap{1.0};
+};
+struct CrowdUpdate {
+  int people{};
+  bool active{};
+  bool began{}, ended{};
+  std::string reason;
+};
+class CrowdEngine {
+ public:
+  explicit CrowdEngine(CrowdConfig config = {});
+  CrowdUpdate update(int people, Mono at);
+  CrowdUpdate reset(const std::string& reason);
+ private:
+  CrowdConfig c_;
+  bool active_{};
+  std::optional<Mono> last_;
+  double above_elapsed_{}, below_elapsed_{};
+};
 }

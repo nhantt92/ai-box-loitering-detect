@@ -20,6 +20,8 @@ struct AnalysisFrame {
   std::string session_id;
   std::chrono::steady_clock::time_point received;
   double inference_ms{};
+  int source_height{};
+  bool overlay_stale{};
 };
 
 }  // namespace aibox

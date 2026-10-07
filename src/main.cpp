@@ -7,6 +7,7 @@
 #include "aibox/core_api.hpp"
 #include "aibox/snapshot_writer.hpp"
 #include "aibox/video_source.hpp"
+#include "aibox/video_artifacts.hpp"
 #ifdef AIBOX_WITH_AWNN
 #include "aibox/awnn_detector.hpp"
 #endif
@@ -14,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <csignal>
+#include <condition_variable>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -28,6 +30,7 @@ std::atomic<std::uint64_t> total_frames{0};
 std::atomic<double> ai_fps{0.0};
 std::atomic<double> latest_inference_ms{0.0};
 std::shared_ptr<const aibox::AnalysisFrame> latest_frame;
+std::shared_ptr<const aibox::AnalysisFrame> latest_analysis_frame;
 std::mutex message_mutex;
 std::string status_message;
 std::string storage_message;
@@ -46,6 +49,116 @@ void set_message(const std::string& value){std::lock_guard<std::mutex> lock(mess
 std::string get_message(){std::lock_guard<std::mutex> lock(message_mutex);return status_message;}
 void set_storage_message(const std::string& value){std::lock_guard<std::mutex> lock(message_mutex);storage_message=value;}
 std::string get_display_message(){std::lock_guard<std::mutex> lock(message_mutex);if(status_message.empty())return storage_message;if(storage_message.empty())return status_message;return status_message+" | "+storage_message;}
+bool camera_source_changed(const aibox::RuntimeConfig& a, const aibox::RuntimeConfig& b) {
+  return a.camera_source_type != b.camera_source_type || a.camera_url != b.camera_url ||
+      a.decoder != b.decoder || a.camera_username != b.camera_username ||
+      a.camera_password != b.camera_password;
+}
+bool tracking_changed(const aibox::RuntimeConfig& a, const aibox::RuntimeConfig& b) {
+  const auto& x = a.tracking; const auto& y = b.tracking;
+  return a.model.profile != b.model.profile || a.model.score_threshold != b.model.score_threshold ||
+      a.model.nms_iou != b.model.nms_iou || a.model.classes != b.model.classes ||
+      x.low_confidence != y.low_confidence || x.high_confidence != y.high_confidence ||
+      x.new_track_confidence != y.new_track_confidence || x.first_match_iou != y.first_match_iou ||
+      x.second_match_iou != y.second_match_iou || x.unconfirmed_match_iou != y.unconfirmed_match_iou ||
+      x.track_ttl_seconds != y.track_ttl_seconds || x.max_predict_seconds != y.max_predict_seconds ||
+      x.process_noise != y.process_noise || x.measurement_noise != y.measurement_noise || x.min_hits != y.min_hits;
+}
+bool same_zones(const std::vector<aibox::Zone>& a, const std::vector<aibox::Zone>& b) {
+  if (a.size() != b.size()) return false;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    if (a[i].id != b[i].id || a[i].name != b[i].name || a[i].enabled != b[i].enabled ||
+        a[i].dwell_seconds != b[i].dwell_seconds || a[i].polygon.size() != b[i].polygon.size()) return false;
+    for (std::size_t j = 0; j < a[i].polygon.size(); ++j)
+      if (a[i].polygon[j].x != b[i].polygon[j].x || a[i].polygon[j].y != b[i].polygon[j].y) return false;
+  }
+  return true;
+}
+bool behavior_changed(const aibox::RuntimeConfig& a, const aibox::RuntimeConfig& b) {
+  const auto& l = a.loitering; const auto& m = a.motion;
+  const auto& r = a.running_detection; const auto& c = a.crowd;
+  const auto& ll = b.loitering; const auto& mm = b.motion;
+  const auto& rr = b.running_detection; const auto& cc = b.crowd;
+  return !same_zones(a.zones, b.zones) || l.enter_confirm != ll.enter_confirm ||
+      l.exit_confirm != ll.exit_confirm || l.lost_grace != ll.lost_grace || l.max_gap != ll.max_gap ||
+      m.enabled != mm.enabled || m.start != mm.start || m.end != mm.end || m.window != mm.window ||
+      m.min_samples != mm.min_samples || m.min_span != mm.min_span || m.start_confirm != mm.start_confirm ||
+      m.end_confirm != mm.end_confirm || m.lost_grace != mm.lost_grace || m.max_gap != mm.max_gap ||
+      r.enabled != rr.enabled || r.start != rr.start || r.end != rr.end || r.window != rr.window ||
+      r.min_samples != rr.min_samples || r.min_span != rr.min_span || r.start_confirm != rr.start_confirm ||
+      r.end_confirm != rr.end_confirm || r.lost_grace != rr.lost_grace || r.max_gap != rr.max_gap ||
+      c.enabled != cc.enabled || c.trigger_people != cc.trigger_people || c.clear_people != cc.clear_people ||
+      c.enter_confirm != cc.enter_confirm || c.exit_confirm != cc.exit_confirm || c.max_gap != cc.max_gap;
+}
+
+class LatestFrameMailbox {
+ public:
+  void publish(aibox::VideoFrame frame) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      latest_ = std::make_shared<aibox::VideoFrame>(std::move(frame));
+    }
+    changed_.notify_one();
+  }
+  std::shared_ptr<aibox::VideoFrame> wait_for(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lock(mutex_);
+    changed_.wait_for(lock, timeout, [&] { return ended_ || static_cast<bool>(latest_); });
+    auto result = std::move(latest_);
+    latest_.reset();
+    return result;
+  }
+  void finish(const std::string& error) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      ended_ = true;
+      error_ = error;
+    }
+    changed_.notify_all();
+  }
+  bool ended() const { std::lock_guard<std::mutex> lock(mutex_); return ended_; }
+  std::string error() const { std::lock_guard<std::mutex> lock(mutex_); return error_; }
+ private:
+  mutable std::mutex mutex_;
+  std::condition_variable changed_;
+  std::shared_ptr<aibox::VideoFrame> latest_;
+  bool ended_{};
+  std::string error_;
+};
+
+std::shared_ptr<const aibox::AnalysisFrame> make_display_frame(
+    const aibox::VideoFrame& captured) {
+  auto display = std::make_shared<aibox::AnalysisFrame>();
+  const int trim_rows = aibox::magenta_bottom_band_rows(captured.bgr);
+  display->bgr = trim_rows > 0
+      ? captured.bgr(cv::Rect(0, 0, captured.bgr.cols, captured.bgr.rows - trim_rows))
+      : captured.bgr;
+  display->source_height = captured.bgr.rows;
+  static std::atomic<bool> reported_artifact{false};
+  if (trim_rows > 0 && !reported_artifact.exchange(true, std::memory_order_relaxed))
+    std::cerr << "Display cleanup: cropping a uniform magenta decoder band ("
+              << trim_rows << " rows); inference keeps the full frame.\n";
+  display->frame_id = captured.frame_id;
+  display->session_id = captured.session_id;
+  display->received = captured.received;
+  const auto analysis = std::atomic_load_explicit(&latest_analysis_frame,
+                                                   std::memory_order_acquire);
+  if (analysis && analysis->session_id == captured.session_id &&
+      analysis->bgr.size() == captured.bgr.size()) {
+    display->zones = analysis->zones;
+    display->inference_ms = analysis->inference_ms;
+    const auto age = captured.received - analysis->received;
+    display->overlay_stale = age < std::chrono::steady_clock::duration::zero() ||
+        age > std::chrono::milliseconds(750);
+    if (!display->overlay_stale) {
+      display->people = analysis->people;
+      display->tracks = analysis->tracks;
+      display->signals = analysis->signals;
+    }
+  } else {
+    display->overlay_stale = true;
+  }
+  return display;
+}
 void wait_for_retry_or_config(std::chrono::seconds duration,
     const std::shared_ptr<aibox::RuntimeConfigController>& config, int revision){
  const auto end=std::chrono::steady_clock::now()+duration;
@@ -76,78 +189,210 @@ void report_events(const std::vector<aibox::EventTransition>& transitions,
 }
 
 void inference_worker(std::shared_ptr<aibox::RuntimeConfigController> config_controller,
-                      aibox::PreviewPublisher& preview,
-                      aibox::EventStore* event_store,aibox::SnapshotWriter* snapshots){
- auto runtime_config=config_controller->current();
- auto behavior=std::make_unique<aibox::BehaviorCoordinator>(runtime_config);
- int behavior_revision=runtime_config.revision;
+                     aibox::PreviewPublisher& preview,
+                     aibox::EventStore* event_store, aibox::SnapshotWriter* snapshots) {
+  auto runtime_config = config_controller->current();
+  auto behavior = std::make_unique<aibox::BehaviorCoordinator>(runtime_config);
+  int behavior_revision = runtime_config.revision;
 #ifdef AIBOX_WITH_AWNN
- const std::string model=AIBOX_DEFAULT_MODEL_PATH;
- std::unique_ptr<aibox::AwnnDetector> detector;
- try{detector=std::make_unique<aibox::AwnnDetector>(model);}catch(const std::exception&e){set_message(std::string("NPU/model error: ")+e.what());std::cerr<<get_message()<<"\n";running=false;return;}
-#else
- std::cerr<<"AIBOX_WITH_AWNN is disabled: RTSP capture is active, inference is unavailable.\n";
-#endif
- std::chrono::seconds backoff(1);auto report=std::chrono::steady_clock::now();auto report_frames=std::uint64_t{0};aibox::ByteTracker tracker(to_tracker_config(runtime_config.tracking));
- while(running){
-  runtime_config=config_controller->current();
-  if(behavior_revision!=runtime_config.revision){
-   behavior=std::make_unique<aibox::BehaviorCoordinator>(runtime_config);
-   tracker=aibox::ByteTracker(to_tracker_config(runtime_config.tracking));
-   behavior_revision=runtime_config.revision;
+  std::unique_ptr<aibox::AwnnDetector> detector;
+  try {
+    detector = std::make_unique<aibox::AwnnDetector>(AIBOX_DEFAULT_MODEL_PATH);
+  } catch (const std::exception& error) {
+    set_message(std::string("NPU/model error: ") + error.what());
+    std::cerr << get_message() << "\n";
+    running = false;
+    return;
   }
-  bool config_changed=false;
-  try{
-   report_events(behavior->reset("camera_disconnected",std::chrono::steady_clock::now()),event_store,snapshots,nullptr);
-   std::cerr<<"Opening configured RTSP input; credentials are not printed.\n";
-   aibox::GstRtspSource camera(runtime_config.camera_url,runtime_config.decoder);
-   camera.start();tracker.reset();set_message("Waiting for camera frames");const auto connected_at=std::chrono::steady_clock::now();auto last_seen=connected_at;
-   while(running){
-   if(config_controller->current().revision!=runtime_config.revision){
-     auto updated_config=config_controller->current();
-     if(updated_config.camera_url!=runtime_config.camera_url||
-        updated_config.decoder!=runtime_config.decoder){
-      set_message("Applying updated camera input");config_changed=true;break;
-     }
-     report_events(behavior->reset("config_changed",std::chrono::steady_clock::now()),
-                   event_store,snapshots,nullptr);
-     runtime_config=std::move(updated_config);
-     behavior=std::make_unique<aibox::BehaviorCoordinator>(runtime_config);
-     tracker=aibox::ByteTracker(to_tracker_config(runtime_config.tracking));
-     behavior_revision=runtime_config.revision;
-     std::cerr<<"Applied analytics settings without reconnecting the camera.\n";
-    }
-    auto frame=camera.pull(std::chrono::seconds(1));
-    if(!frame){if(std::chrono::steady_clock::now()-last_seen>=std::chrono::seconds(10)){const auto err=camera.last_error();set_message(err.empty()?"Camera stream timeout":err);std::cerr<<"Camera stream timeout"<<(err.empty()?"":": "+err)<<"\n";break;}continue;}
-    last_seen=frame->received;camera_connected=true;set_message("");
-    auto result=std::make_shared<aibox::AnalysisFrame>();result->bgr=std::move(frame->bgr);result->frame_id=frame->frame_id;result->session_id=frame->session_id;result->received=frame->received;
-#ifdef AIBOX_WITH_AWNN
-    const auto infer_start=std::chrono::steady_clock::now();result->people=detector->detect(result->bgr,runtime_config.model.score_threshold,runtime_config.model.nms_iou);result->inference_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-infer_start).count();
-#endif
-    result->tracks=tracker.update(result->people,result->received);
-    latest_inference_ms.store(result->inference_ms,std::memory_order_relaxed);
-    result->zones=runtime_config.zones;
-    const auto behavior_update=behavior->update(result->tracks,result->received,result->session_id,result->bgr.cols,result->bgr.rows);
-    result->signals=behavior_update.signals;
-    report_events(behavior_update.events,event_store,snapshots,&result->bgr);
-    if(event_store&&!event_store->healthy())set_storage_message("Event storage degraded: "+event_store->last_error());
-    else if(snapshots&&!snapshots->healthy())set_storage_message("Snapshot storage degraded: "+snapshots->last_error());
-    else if(event_store&&snapshots)set_storage_message("");
-    total_frames.fetch_add(1,std::memory_order_relaxed);std::atomic_store_explicit(&latest_frame,std::shared_ptr<const aibox::AnalysisFrame>(result),std::memory_order_release);preview.submit(result);
-    const auto now=std::chrono::steady_clock::now();if(now-report>=std::chrono::seconds(5)){const auto n=total_frames.load(std::memory_order_relaxed);ai_fps.store(static_cast<double>(n-report_frames)/std::chrono::duration<double>(now-report).count(),std::memory_order_relaxed);report_frames=n;report=now;
-#ifdef AIBOX_WITH_AWNN
-     std::cout<<"session="<<result->session_id<<" frame="<<result->frame_id<<" people="<<result->people.size()<<" inference_ms="<<result->inference_ms<<" received_frames="<<n<<"\n";
 #else
-     std::cout<<"session="<<result->session_id<<" frame="<<result->frame_id<<" image="<<result->bgr.cols<<"x"<<result->bgr.rows<<" received_frames="<<n<<"\n";
+  std::cerr << "AIBOX_WITH_AWNN is disabled: RTSP capture is active, inference is unavailable.\n";
 #endif
+
+  std::chrono::seconds backoff(1);
+  auto report = std::chrono::steady_clock::now();
+  std::uint64_t report_frames = 0;
+  aibox::ByteTracker tracker(to_tracker_config(runtime_config.tracking));
+  while (running) {
+    runtime_config = config_controller->current();
+    if (behavior_revision != runtime_config.revision) {
+      behavior = std::make_unique<aibox::BehaviorCoordinator>(runtime_config);
+      tracker = aibox::ByteTracker(to_tracker_config(runtime_config.tracking));
+      behavior_revision = runtime_config.revision;
     }
-    if(frame->received-connected_at>=std::chrono::seconds(10))backoff=std::chrono::seconds(1);
-   }
-  }catch(const std::exception&e){const std::string msg=e.what();set_message(msg);std::cerr<<"Camera unavailable: "<<msg<<"\n";if(msg.find("Required GStreamer element unavailable")!=std::string::npos||msg.find("Invalid RTSP URI")!=std::string::npos){running=false;break;}}
-  report_events(behavior->reset(config_changed?"config_changed":"camera_disconnected",std::chrono::steady_clock::now()),event_store,snapshots,nullptr);
-  camera_connected=false;if(!running)break;if(config_changed){tracker.reset();backoff=std::chrono::seconds(1);continue;}wait_for_retry_or_config(backoff,config_controller,runtime_config.revision);if(config_controller->current().revision!=runtime_config.revision){backoff=std::chrono::seconds(1);continue;}backoff=std::min(backoff*2,std::chrono::seconds(30));
- }
- camera_connected=false;if(event_store)event_store->flush();
+
+    bool config_changed = false;
+    try {
+      report_events(behavior->reset("camera_disconnected", std::chrono::steady_clock::now()),
+                    event_store, snapshots, nullptr);
+      std::cerr << "Opening configured video source; credentials are not printed.\n";
+      aibox::GstVideoSource camera(runtime_config.camera_source_type,
+          runtime_config.camera_url, runtime_config.decoder,
+          runtime_config.camera_username, runtime_config.camera_password);
+      camera.start();
+      tracker.reset();
+      std::atomic_store_explicit(&latest_analysis_frame,
+          std::shared_ptr<const aibox::AnalysisFrame>{}, std::memory_order_release);
+      set_message("Waiting for camera frames");
+      auto mailbox = std::make_shared<LatestFrameMailbox>();
+      std::atomic<bool> capture_active{true};
+      const auto connected_at = std::chrono::steady_clock::now();
+      std::thread capture_thread([&] {
+        auto last_seen = std::chrono::steady_clock::now();
+        try {
+          while (running && capture_active.load(std::memory_order_relaxed)) {
+            auto captured = camera.pull(std::chrono::milliseconds(100));
+            if (!captured) {
+              if (std::chrono::steady_clock::now() - last_seen >= std::chrono::seconds(10)) {
+                const auto error = camera.last_error();
+                const auto message = error.empty() ? "Camera stream timeout" : error;
+                set_message(message);
+                std::cerr << "Camera stream timeout: " << message << "\n";
+                mailbox->finish(message);
+                return;
+              }
+              continue;
+            }
+            last_seen = captured->received;
+            camera_connected = true;
+            set_message("");
+            const auto display_frame = make_display_frame(*captured);
+            std::atomic_store_explicit(&latest_frame, display_frame, std::memory_order_release);
+            preview.submit(display_frame);
+            mailbox->publish(std::move(*captured));
+          }
+        } catch (const std::exception& error) {
+          set_message(error.what());
+          mailbox->finish(error.what());
+          return;
+        }
+        mailbox->finish("capture stopped");
+      });
+
+      try {
+      while (running) {
+        if (config_controller->current().revision != runtime_config.revision) {
+          auto updated_config = config_controller->current();
+          if (camera_source_changed(updated_config, runtime_config)) {
+            set_message("Applying updated camera input");
+            config_changed = true;
+            break;
+          }
+          const bool reset_tracker = tracking_changed(updated_config, runtime_config);
+          const bool reset_behavior = reset_tracker || behavior_changed(updated_config, runtime_config);
+          if (reset_behavior)
+            report_events(behavior->reset("config_changed", std::chrono::steady_clock::now()),
+                          event_store, snapshots, nullptr);
+          runtime_config = std::move(updated_config);
+          if (reset_behavior) behavior = std::make_unique<aibox::BehaviorCoordinator>(runtime_config);
+          if (reset_tracker) tracker = aibox::ByteTracker(to_tracker_config(runtime_config.tracking));
+          behavior_revision = runtime_config.revision;
+          if (reset_behavior || reset_tracker)
+            std::atomic_store_explicit(&latest_analysis_frame,
+                std::shared_ptr<const aibox::AnalysisFrame>{}, std::memory_order_release);
+          std::cerr << (reset_behavior || reset_tracker
+              ? "Applied analytics settings without reconnecting the camera.\n"
+              : "Applied non-analytics settings without resetting tracks.\n");
+        }
+
+        auto captured = mailbox->wait_for(std::chrono::milliseconds(100));
+        if (!captured) {
+          if (mailbox->ended()) break;
+          continue;
+        }
+        auto result = std::make_shared<aibox::AnalysisFrame>();
+        result->bgr = captured->bgr;
+        result->frame_id = captured->frame_id;
+        result->session_id = captured->session_id;
+        result->received = captured->received;
+#ifdef AIBOX_WITH_AWNN
+        const auto infer_start = std::chrono::steady_clock::now();
+        result->people = detector->detect(result->bgr, runtime_config.model.score_threshold,
+                                           runtime_config.model.nms_iou,
+                                           runtime_config.model.classes);
+        result->inference_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - infer_start).count();
+#endif
+        result->tracks = tracker.update(result->people, result->received);
+        result->zones = runtime_config.zones;
+        const auto behavior_update = behavior->update(result->tracks, result->received,
+            result->session_id, result->bgr.cols, result->bgr.rows);
+        result->signals = behavior_update.signals;
+        latest_inference_ms.store(result->inference_ms, std::memory_order_relaxed);
+        std::atomic_store_explicit(&latest_analysis_frame,
+            std::shared_ptr<const aibox::AnalysisFrame>(result), std::memory_order_release);
+        report_events(behavior_update.events, event_store, snapshots, &result->bgr);
+        if (event_store && !event_store->healthy())
+          set_storage_message("Event storage degraded: " + event_store->last_error());
+        else if (snapshots && !snapshots->healthy())
+          set_storage_message("Snapshot storage degraded: " + snapshots->last_error());
+        else if (event_store && snapshots)
+          set_storage_message("");
+
+        total_frames.fetch_add(1, std::memory_order_relaxed);
+        const auto now = std::chrono::steady_clock::now();
+        if (now - report >= std::chrono::seconds(5)) {
+          const auto count = total_frames.load(std::memory_order_relaxed);
+          ai_fps.store(static_cast<double>(count - report_frames) /
+                       std::chrono::duration<double>(now - report).count(),
+                       std::memory_order_relaxed);
+          report_frames = count;
+          report = now;
+#ifdef AIBOX_WITH_AWNN
+          std::cout << "session=" << result->session_id << " frame=" << result->frame_id
+                    << " people=" << result->people.size()
+                    << " inference_ms=" << result->inference_ms
+                    << " inference_frames=" << count << "\n";
+#else
+          std::cout << "session=" << result->session_id << " frame=" << result->frame_id
+                    << " image=" << result->bgr.cols << "x" << result->bgr.rows
+                    << " inference_frames=" << count << "\n";
+#endif
+        }
+        if (captured->received - connected_at >= std::chrono::seconds(10))
+          backoff = std::chrono::seconds(1);
+      }
+      } catch (...) {
+        capture_active = false;
+        if (capture_thread.joinable()) capture_thread.join();
+        camera.stop();
+        throw;
+      }
+
+      capture_active = false;
+      if (capture_thread.joinable()) capture_thread.join();
+      camera.stop();
+      if (!mailbox->error().empty() && mailbox->error() != "capture stopped" && running)
+        set_message(mailbox->error());
+    } catch (const std::exception& error) {
+      const std::string message = error.what();
+      set_message(message);
+      std::cerr << "Camera unavailable: " << message << "\n";
+      if (message.find("Required GStreamer element unavailable") != std::string::npos ||
+          message.find("Invalid RTSP URI") != std::string::npos) {
+        running = false;
+        break;
+      }
+    }
+
+    report_events(behavior->reset(config_changed ? "config_changed" : "camera_disconnected",
+                                  std::chrono::steady_clock::now()),
+                  event_store, snapshots, nullptr);
+    camera_connected = false;
+    if (!running) break;
+    if (config_changed) {
+      tracker.reset();
+      backoff = std::chrono::seconds(1);
+      continue;
+    }
+    wait_for_retry_or_config(backoff, config_controller, runtime_config.revision);
+    if (config_controller->current().revision != runtime_config.revision) {
+      backoff = std::chrono::seconds(1);
+      continue;
+    }
+    backoff = std::min(backoff * 2, std::chrono::seconds(30));
+  }
+  camera_connected = false;
+  if (event_store) event_store->flush();
 }
 }
 
@@ -156,8 +401,17 @@ int main(){
  const char* config_env=std::getenv("AIBOX_CONFIG_PATH");const std::string config_path=config_env&&*config_env?config_env:"config/example.json";
  aibox::RuntimeConfig runtime_config;
  try{runtime_config=aibox::load_runtime_config(config_path);}catch(const std::exception&e){std::cerr<<"Config error: "<<e.what()<<"\n";return 1;}
- const char* uri_env=std::getenv("AIBOX_RTSP_URL");
- if(uri_env&&*uri_env)runtime_config.camera_url=uri_env;
+  const char* uri_env=std::getenv("AIBOX_RTSP_URL");
+  if(uri_env&&*uri_env)
+    std::cerr << "Ignoring AIBOX_RTSP_URL; configure the persisted camera source in the web UI or config file.\n";
+  if(runtime_config.camera_source_type=="rtsp"){
+   const char* user_env=std::getenv("AIBOX_RTSP_USER");
+   const char* password_env=std::getenv("AIBOX_RTSP_PASSWORD");
+   if(!runtime_config.camera_credentials_explicit) {
+    if(runtime_config.camera_username.empty()&&user_env)runtime_config.camera_username=user_env;
+    if(runtime_config.camera_password.empty()&&password_env)runtime_config.camera_password=password_env;
+   }
+  }
  auto config_controller=std::make_shared<aibox::RuntimeConfigController>(runtime_config,config_path);
  const char* data_env=std::getenv("AIBOX_DATA");const std::string data_dir=data_env&&*data_env?data_env:"data";
  const char* db_env=std::getenv("AIBOX_EVENT_DB");const std::string db_path=db_env&&*db_env?db_env:data_dir+"/events.sqlite3";
@@ -168,7 +422,7 @@ int main(){
  aibox::PreviewPublisher preview(runtime_config.preview);
  std::unique_ptr<aibox::CoreApiServer> api;
  try{api=std::make_unique<aibox::CoreApiServer>(preview,config_controller,event_store,[&]{
-  aibox::CoreStatus status;status.camera_connected=camera_connected.load(std::memory_order_relaxed);status.ai_fps=ai_fps.load(std::memory_order_relaxed);status.frame_id=total_frames.load(std::memory_order_relaxed);const auto frame=std::atomic_load_explicit(&latest_frame,std::memory_order_acquire);if(frame)status.session_id=frame->session_id;if(frame&&status.camera_connected){status.person_detections=frame->people.size();for(const auto& track:frame->tracks)if(track.class_id==0&&track.observed)++status.person_tracks;for(const auto& signal:frame->signals)if(signal.type=="loitering")status.loitering.push_back(signal);}const auto active_zones=config_controller->current().zones;for(const auto& zone:active_zones)if(zone.enabled)++status.enabled_zones;status.inference_ms=latest_inference_ms.load(std::memory_order_relaxed);status.message=get_message();status.storage_state=event_store?(event_store->healthy()&&snapshots&&snapshots->healthy()?"ok":"degraded"):"unavailable";return status;
+  aibox::CoreStatus status;status.camera_connected=camera_connected.load(std::memory_order_relaxed);status.ai_fps=ai_fps.load(std::memory_order_relaxed);status.frame_id=total_frames.load(std::memory_order_relaxed);const auto frame=std::atomic_load_explicit(&latest_frame,std::memory_order_acquire);if(frame){status.session_id=frame->session_id;status.overlay_stale=frame->overlay_stale;}if(frame&&status.camera_connected){status.person_detections=std::count_if(frame->people.begin(),frame->people.end(),[](const aibox::Detection& detection){return detection.class_id==0;});for(const auto& track:frame->tracks)if(track.class_id==0&&track.observed)++status.person_tracks;for(const auto& signal:frame->signals){if(signal.type=="loitering")status.loitering.push_back(signal);else if(signal.type=="crowd")status.crowd.push_back(signal);}}const auto active_zones=config_controller->current().zones;for(const auto& zone:active_zones)if(zone.enabled)++status.enabled_zones;status.inference_ms=latest_inference_ms.load(std::memory_order_relaxed);status.message=get_message();status.storage_state=event_store?(event_store->healthy()&&snapshots&&snapshots->healthy()?"ok":"degraded"):"unavailable";return status;
  },data_dir);std::cerr<<"Core API listening on 127.0.0.1:"<<api->port()<<"; token file: "<<api->token_file()<<"\n";}catch(const std::exception&e){set_message(std::string("Core API unavailable: ")+e.what());std::cerr<<"Core API unavailable: "<<e.what()<<"; continuing analytics and HDMI\n";}
  aibox::HdmiRenderer display;
  if(!display.available())std::cerr<<"Continuing headless; analytics worker is independent of HDMI.\n";

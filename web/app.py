@@ -235,7 +235,8 @@ async def stream(request: Request):
     try:
         headers = core_headers()
         upstream = await client.send(client.build_request(
-            "GET", f"{CORE_URL}/api/stream.mjpg", headers=headers), stream=True)
+            "GET", f"{CORE_URL}/api/stream.mjpg",
+            headers={**headers, "Accept-Encoding": "identity"}), stream=True)
         if upstream.status_code != 200:
             await upstream.aclose()
             raise HTTPException(503, "Core preview stream is unavailable")
@@ -260,7 +261,8 @@ async def stream(request: Request):
                 PREVIEW_CLIENTS -= 1
 
     return StreamingResponse(relay(), media_type="multipart/x-mixed-replace; boundary=frame",
-                             headers={"Cache-Control": "no-store"})
+                             headers={"Cache-Control": "no-store, no-transform",
+                                      "X-Accel-Buffering": "no"})
 
 
 @app.get("/{path:path}")
